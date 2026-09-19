@@ -1,0 +1,11 @@
+{
+  "name": "exiffix",
+  "version": "1.0.0",
+  "private": true,
+  "description": "在线照片 EXIF 编辑器:日期 / GPS 修正,纯浏览器本地处理",
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "test": "node test/core.test.js"
+  },
+  "license": "MIT"
+}

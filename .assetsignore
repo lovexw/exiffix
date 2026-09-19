@@ -1,0 +1,13 @@
+# Cloudflare Pages 部署时忽略的文件(wrangler pages deploy .)
+test-images
+test
+.github
+node_modules
+dev-server.mjs
+package.json
+.wrangler
+.DS_Store
+.gitignore
+.assetsignore
+README.md
+LICENSE

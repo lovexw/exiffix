@@ -1,0 +1,5 @@
+# 本地测试大图(系统壁纸衍生,不入库;可自行用 sips / 相机照片生成)
+test-images/
+node_modules/
+.DS_Store
+*.log
