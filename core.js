@@ -188,6 +188,94 @@
     return null;
   }
 
+  // ---------- HEIF/HEIC 容器解析:主图类型与显示方向(irot/imir) ----------
+
+  // 方向信息写在容器属性里,解码器(不含 libheif 头文件转换)需要自己摆正像素。
+  function parseHeifContainer(u8) {
+    u8 = ensureU8(u8);
+    var out = { major: null, brands: [], primaryId: 0, primaryType: null, rotation: 0, mirror: null };
+    if (u8.length < 12) return out;
+    function u32(o) { return (u8[o] << 24 | u8[o + 1] << 16 | u8[o + 2] << 8 | u8[o + 3]) >>> 0; }
+    function type(o) { return String.fromCharCode(u8[o], u8[o + 1], u8[o + 2], u8[o + 3]); }
+
+    if (type(4) === 'ftyp') {
+      out.major = type(8);
+      var nb = (u32(0) - 16) / 4; // 跳过 major brand(4) + minor version(4)
+      for (var i = 0; i < nb; i++) out.brands.push(type(16 + i * 4));
+    }
+
+    var meta = null;
+    for (var p = 0; p + 8 <= u8.length;) {
+      var sz = u32(p), tp = type(p + 4);
+      if (sz < 8 || p + sz > u8.length) break;
+      if (tp === 'meta') { meta = { start: p + 12, end: p + sz }; break; } // fullbox 跳 4
+      p += sz;
+    }
+    if (!meta) return out;
+
+    var props = []; // ipco 属性列表 [{idx,type,start,size}]
+    var ipma = null;
+    var infeList = [];
+    for (var o = meta.start; o + 8 <= meta.end;) {
+      var size = u32(o), t = type(o + 4);
+      if (size < 8 || o + size > meta.end) break;
+      if (t === 'pitm') {
+        out.primaryId = (u8[o + 12] << 8) | u8[o + 13];
+      } else if (t === 'iinf') {
+        for (var q = o + 14; q + 8 <= o + size;) { // v0: fullbox(4)+count(2) → 条目从 o+14
+          var s2 = u32(q), t2 = type(q + 4);
+          if (s2 < 8 || q + s2 > o + size) break;
+          if (t2 === 'infe' && u8[q + 8] >= 2) {
+            infeList.push({ id: (u8[q + 12] << 8) | u8[q + 13], type: type(q + 16) });
+          }
+          q += s2;
+        }
+      } else if (t === 'iprp') {
+        for (var q2 = o + 8; q2 + 8 <= o + size;) {
+          var s3 = u32(q2), t3 = type(q2 + 4);
+          if (s3 < 8 || q2 + s3 > o + size) break;
+          if (t3 === 'ipco') { props.start = q2 + 8; props.end = q2 + s3; }
+          if (t3 === 'ipma') ipma = { start: q2 + 12, end: q2 + s3, version: u8[q2 + 8], flags: u8[q2 + 11] };
+          q2 += s3;
+        }
+      }
+      o += size;
+    }
+
+    var primary = infeList.find(function (x) { return x.id === out.primaryId; }) || infeList[0];
+    out.primaryType = primary ? primary.type : null;
+    if (!ipma || props.start == null) return out;
+
+    // ipco 子 box 按顺序编号 1..n
+    var list = [];
+    for (var q3 = props.start, idx = 1; q3 + 8 <= props.end;) {
+      var s4 = u32(q3), t4 = type(q3 + 4);
+      if (s4 < 8 || q3 + s4 > props.end) break;
+      list.push({ idx: idx++, type: t4, start: q3, size: s4 });
+      q3 += s4;
+    }
+    function propOf(index) { return list.find(function (x) { return x.idx === index; }); }
+
+    var o2 = ipma.start;
+    var count = u32(o2); o2 += 4;
+    for (var e = 0; e < count && o2 < ipma.end; e++) {
+      var id = ipma.version < 1 ? (u8[o2] << 8 | u8[o2 + 1]) : u32(o2);
+      o2 += ipma.version < 1 ? 2 : 4;
+      var n = u8[o2]; o2 += 1;
+      for (var j = 0; j < n && o2 <= ipma.end; j++) {
+        var index, essential;
+        if (ipma.flags & 1) { essential = !!(u8[o2] & 0x80); index = ((u8[o2] << 8) | u8[o2 + 1]) & 0x7fff; o2 += 2; }
+        else { essential = !!(u8[o2] & 0x80); index = u8[o2] & 0x7f; o2 += 1; }
+        if (id !== out.primaryId) continue;
+        var prop = propOf(index);
+        if (!prop) continue;
+        if (prop.type === 'irot') out.rotation = u8[prop.start + 8] & 3;      // 90° 逆时针 ×角度
+        else if (prop.type === 'imir') out.mirror = u8[prop.start + 8] & 1;   // 0=左右镜像 1=上下镜像
+      }
+    }
+    return out;
+  }
+
   // ---------- JPEG ----------
 
   function jpegWithExif(u8, patch) {
@@ -477,6 +565,7 @@
     dictFromTiffBytes: dictFromTiffBytes,
     tiffBytesFromDict: tiffBytesFromDict,
     sniffImageKind: sniffImageKind,
+    parseHeifContainer: parseHeifContainer,
     jpegWithExif: jpegWithExif,
     pngWithExif: pngWithExif,
     webpWithExif: webpWithExif,

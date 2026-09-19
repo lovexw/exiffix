@@ -150,14 +150,23 @@ async function reencodeToJpeg(blob) {
 
 let _libheifPromise = null;
 function ensureLibheif() {
-  if (window.libheif && window.libheif.HeifDecoder) return Promise.resolve(window.libheif);
+  if (ensureLibheif._lib) return Promise.resolve(ensureLibheif._lib);
   if (!_libheifPromise) {
     _libheifPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = 'vendor/libheif-bundle.js?v=4';
-      s.onload = () => {
-        if (window.libheif && window.libheif.HeifDecoder) resolve(window.libheif);
-        else { _libheifPromise = null; reject(new Error('libheif 初始化失败')); }
+      s.src = 'vendor/libheif-bundle.js?v=5';
+      s.onload = async () => {
+        try {
+          // bundle 导出的是 Emscripten 工厂函数,必须调用并等待初始化,
+          // HeifDecoder 等类挂在初始化后的实例上
+          const factory = window.libheif;
+          let lib;
+          if (typeof factory === 'function') lib = await factory();
+          else if (factory && typeof factory.HeifDecoder === 'function') lib = factory;
+          if (!lib || typeof lib.HeifDecoder !== 'function') throw new Error('libheif 初始化失败');
+          ensureLibheif._lib = lib;
+          resolve(lib);
+        } catch (e) { _libheifPromise = null; reject(e); }
       };
       s.onerror = () => { _libheifPromise = null; reject(new Error('libheif 解码器加载失败')); };
       document.head.appendChild(s);
@@ -189,12 +198,30 @@ function applyOrientation(src, o) {
   return dst;
 }
 
+// 按 HEIF 容器属性摆正:irot(90° 逆时针 ×角度)+ imir(先镜像后旋转)
+function applyHeifTransform(src, rotation, mirror) {
+  if (!rotation && mirror === null) return src;
+  const swap = rotation === 1 || rotation === 3;
+  const dst = document.createElement('canvas');
+  dst.width = swap ? src.height : src.width;
+  dst.height = swap ? src.width : src.height;
+  const ctx = dst.getContext('2d');
+  ctx.translate(dst.width / 2, dst.height / 2);
+  if (rotation) ctx.rotate(-rotation * Math.PI / 2);
+  if (mirror !== null) {
+    if (mirror === 0) ctx.scale(-1, 1);
+    else ctx.scale(1, -1);
+  }
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  return dst;
+}
+
 function canvasToJpegBlob(canvas) {
   return new Promise((resolve, reject) => canvas.toBlob(
     (b) => (b ? resolve(b) : reject(new Error('JPEG 编码失败'))), 'image/jpeg', 0.92));
 }
 
-async function decodeHeicWithLibheif(blob, orientation) {
+async function decodeHeicWithLibheif(blob, orient) {
   const libheif = await ensureLibheif();
   const buf = await blob.arrayBuffer();
   const data = new libheif.HeifDecoder().decode(buf);
@@ -216,17 +243,26 @@ async function decodeHeicWithLibheif(blob, orientation) {
   canvas.width = w;
   canvas.height = h;
   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(frame.data), w, h), 0, 0);
-  return canvasToJpegBlob(applyOrientation(canvas, orientation));
+  let out = canvas;
+  if (orient.rotation || orient.mirror !== null && orient.mirror !== undefined) {
+    out = applyHeifTransform(out, orient.rotation, orient.mirror === undefined ? null : orient.mirror);
+  } else if (orient.orientation) {
+    out = applyOrientation(out, orient.orientation);
+  }
+  window.EXIFFIX._lastHeicDecoder = 'libheif';
+  return canvasToJpegBlob(out);
 }
 
-async function decodeHeicToJpeg(blob, orientation) {
+async function decodeHeicToJpeg(blob, orient) {
+  orient = orient || {};
   let cause = '';
   try {
-    return await decodeHeicWithLibheif(blob, orientation);
+    return await decodeHeicWithLibheif(blob, orient);
   } catch (e) { cause = e.message; console.warn('libheif 解码失败,尝试备用解码器:', e); }
   try {
     await ensureHeicDecoder();
     const out = await heic2any({ blob, toType: 'image/jpeg', quality: 0.92 });
+    window.EXIFFIX._lastHeicDecoder = 'heic2any';
     return Array.isArray(out) ? out[0] : out;
   } catch (e) { cause = e.message; }
   throw new Error(`HEIC 解码失败,该照片的编码暂不受支持(如 10-bit HDR)。可在手机上改用「兼容性最佳」导出 JPEG 后重试(${cause})`);
@@ -252,13 +288,18 @@ async function loadItem(item) {
     let displayBlob = item.file;
     if (item.kind === 'heic') {
       busy(true, `正在解码 HEIC:${item.name}`);
-      // 先读方向标签:解码像素需要"摆正",否则竖拍照片会横躺
-      let orientation = null;
+      // 方向:优先容器 irot/imir(iOS 照片的 EXIF 常无 Orientation),EXIF 兜底
+      let orient = {};
+      try {
+        const head = new Uint8Array(await item.file.slice(0, 524288).arrayBuffer());
+        const info = CORE.parseHeifContainer(head);
+        if (info) { orient.rotation = info.rotation; orient.mirror = info.mirror; }
+      } catch (e) { /* 解析失败则不旋转 */ }
       try {
         const p = await exifr.parse(item.file, { tiff: true, ifd0: true, reviveValues: true, silentErrors: true });
-        orientation = p && p.Orientation;
+        if (orient.rotation == null && orient.mirror == null && p) orient.orientation = p.Orientation;
       } catch (e) { /* 无 EXIF 时默认不旋转 */ }
-      displayBlob = await decodeHeicToJpeg(item.file, orientation);
+      displayBlob = await decodeHeicToJpeg(item.file, orient);
       item.displayBlob = displayBlob;
       busy(false);
     } else if (item.kind === 'avif') {
