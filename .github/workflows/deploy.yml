@@ -7,6 +7,8 @@ on:
 
 jobs:
   deploy:
+    # 未配置 Secrets 时跳过,避免 CI 报错(配置后自动恢复部署)
+    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
