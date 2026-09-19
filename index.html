@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExifFix · 在线照片 EXIF 编辑器 — 日期 / GPS 信息修正</title>
 <meta name="description" content="在浏览器本地修改照片的 EXIF 信息:拍摄日期、GPS 位置、相机型号等。支持 JPEG / PNG / WebP / HEIC,图片不会上传到任何服务器,适合老照片数据纠正。">
-<meta name="theme-color" content="#0b1220">
+<meta name="theme-color" content="#f5f7fb">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📷%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
 
@@ -34,7 +34,14 @@
   <section id="dropzone" class="dropzone">
     <div class="dz-icon">🖼️</div>
     <h2>把照片拖到这里,或点击选择</h2>
-    <p>支持 JPEG / PNG / WebP / HEIC,可一次选择多张 · 也可以直接 <b>Ctrl/⌘+V</b> 粘贴截图或复制的图片</p>
+    <p>支持 JPEG / PNG / WebP / HEIC,可一次选择多张 · 也可以直接 <b>Ctrl/⌘+V</b> 粘贴图片</p>
+    <div class="dz-steps">
+      <span class="dz-step"><b>1</b> 添加照片</span>
+      <span class="dz-arrow">→</span>
+      <span class="dz-step"><b>2</b> 修改日期 / 位置 / 相机信息</span>
+      <span class="dz-arrow">→</span>
+      <span class="dz-step"><b>3</b> 下载保存</span>
+    </div>
     <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" multiple hidden>
   </section>
 
@@ -70,40 +77,44 @@
               </div>
               <span id="edDims" class="muted"></span>
               <div class="preview-actions">
-                <button id="btnDownloadOne" class="btn">⬇️ 下载这张</button>
+                <button id="btnDownloadOne" class="btn primary">⬇️ 下载这张</button>
                 <button id="btnRevert" class="btn ghost">↩️ 撤销本张修改</button>
               </div>
+              <p class="hint" style="margin-top:12px">修改先保存在内存中,点下载时才会写入文件。带 <b style="color:var(--accent)">蓝色圆点</b> 的输入框表示已修改。</p>
             </div>
           </div>
 
           <div class="card">
             <h3>📅 日期时间</h3>
-            <p class="hint">EXIF 时间不带时区,按拍摄地当地时间填写。清空输入框并留空表示删除该标签。</p>
+            <p class="hint">EXIF 时间不带时区,按拍摄地当地时间填写。清空某个输入框表示删除该标签;浅色小字显示文件里的原值。</p>
             <div class="grid2">
-              <div class="field">
+              <div class="field" data-patch="dtOriginal">
                 <label>拍摄时间 <span class="tag-name">DateTimeOriginal</span></label>
                 <div class="dt-row">
                   <input type="datetime-local" id="f-dtOriginal" step="60">
-                  <input type="number" id="f-dtOriginalSec" min="0" max="59" class="sec-input" title="秒">
+                  <input type="number" id="f-dtOriginalSec" min="0" max="59" class="sec-input" title="秒" placeholder="秒">
                 </div>
+                <div class="orig-hint" id="orig-dtOriginal"></div>
               </div>
-              <div class="field">
+              <div class="field" data-patch="dtDigitized">
                 <label>数字化时间 <span class="tag-name">DateTimeDigitized</span></label>
                 <div class="dt-row">
                   <input type="datetime-local" id="f-dtDigitized" step="60">
-                  <input type="number" id="f-dtDigitizedSec" min="0" max="59" class="sec-input" title="秒">
+                  <input type="number" id="f-dtDigitizedSec" min="0" max="59" class="sec-input" title="秒" placeholder="秒">
                 </div>
+                <div class="orig-hint" id="orig-dtDigitized"></div>
               </div>
-              <div class="field">
+              <div class="field" data-patch="dtModify">
                 <label>修改时间 <span class="tag-name">ModifyDate</span></label>
                 <div class="dt-row">
                   <input type="datetime-local" id="f-dtModify" step="60">
-                  <input type="number" id="f-dtModifySec" min="0" max="59" class="sec-input" title="秒">
+                  <input type="number" id="f-dtModifySec" min="0" max="59" class="sec-input" title="秒" placeholder="秒">
                 </div>
+                <div class="orig-hint" id="orig-dtModify"></div>
               </div>
               <div class="field">
-                <label>&nbsp;</label>
-                <button id="btnCopyShootTime" class="btn ghost">把拍摄时间同步到修改 / 数字化时间</button>
+                <label>快捷操作</label>
+                <button id="btnCopyShootTime" class="btn dashed">把拍摄时间同步到修改 / 数字化时间</button>
               </div>
             </div>
           </div>
@@ -112,9 +123,18 @@
             <h3>📍 GPS 位置</h3>
             <p class="hint">在地图上点击选点,或直接输入经纬度(十进制度,南纬 / 西经为负)。老照片没有 GPS?选一个记忆中的地点即可。</p>
             <div class="grid2">
-              <div class="field"><label>纬度 Latitude</label><input type="number" id="f-lat" step="any" placeholder="如 39.9087"></div>
-              <div class="field"><label>经度 Longitude</label><input type="number" id="f-lng" step="any" placeholder="如 116.3975"></div>
-              <div class="field"><label>海拔(米,可留空)</label><input type="number" id="f-alt" step="any"></div>
+              <div class="field" data-patch="gps">
+                <label>纬度 Latitude</label>
+                <input type="number" id="f-lat" step="any" placeholder="如 39.9087">
+              </div>
+              <div class="field" data-patch="gps">
+                <label>经度 Longitude</label>
+                <input type="number" id="f-lng" step="any" placeholder="如 116.3975">
+              </div>
+              <div class="field" data-patch="gps">
+                <label>海拔(米,可留空)</label>
+                <input type="number" id="f-alt" step="any">
+              </div>
               <div class="field">
                 <label>按地名搜索</label>
                 <div class="search-row">
@@ -134,28 +154,29 @@
           <div class="card">
             <h3>📷 相机与镜头</h3>
             <div class="grid2">
-              <div class="field"><label>厂商 Make</label><input type="text" id="f-make"></div>
-              <div class="field"><label>机型 Model</label><input type="text" id="f-model"></div>
-              <div class="field"><label>镜头厂商 LensMake</label><input type="text" id="f-lensMake"></div>
-              <div class="field"><label>镜头型号 LensModel</label><input type="text" id="f-lensModel"></div>
-              <div class="field"><label>软件 Software</label><input type="text" id="f-software"></div>
+              <div class="field" data-patch="make"><label>厂商 Make</label><input type="text" id="f-make"></div>
+              <div class="field" data-patch="model"><label>机型 Model</label><input type="text" id="f-model"></div>
+              <div class="field" data-patch="lensMake"><label>镜头厂商 LensMake</label><input type="text" id="f-lensMake"></div>
+              <div class="field" data-patch="lensModel"><label>镜头型号 LensModel</label><input type="text" id="f-lensModel"></div>
+              <div class="field" data-patch="software"><label>软件 Software</label><input type="text" id="f-software"></div>
             </div>
           </div>
 
           <div class="card">
             <h3>📝 描述与版权</h3>
-            <div class="field"><label>图片描述 ImageDescription</label><textarea id="f-description" rows="2"></textarea></div>
+            <div class="field" data-patch="description" style="margin-bottom:10px">
+              <label>图片描述 ImageDescription</label>
+              <textarea id="f-description" rows="2"></textarea>
+            </div>
             <div class="grid2">
-              <div class="field"><label>作者 Artist</label><input type="text" id="f-artist"></div>
-              <div class="field"><label>版权 Copyright</label><input type="text" id="f-copyright"></div>
+              <div class="field" data-patch="artist"><label>作者 Artist</label><input type="text" id="f-artist"></div>
+              <div class="field" data-patch="copyright"><label>版权 Copyright</label><input type="text" id="f-copyright"></div>
             </div>
           </div>
 
           <div class="card">
             <h3>🧹 其他</h3>
-            <div class="field">
-              <label class="danger-label"><input type="checkbox" id="f-removeExif"> 清除这张照片的全部 EXIF 信息(保留图像本身)</label>
-            </div>
+            <label class="danger-label"><input type="checkbox" id="f-removeExif"> 清除这张照片的全部 EXIF 信息(保留图像本身)</label>
           </div>
 
           <div class="card" id="allExifCard">
@@ -171,9 +192,9 @@
       <div id="batchPane" class="pane" hidden>
         <div class="card">
           <h3>批量应用到已勾选的照片 <span id="batchTarget" class="muted"></span></h3>
-          <p class="hint">只有勾选的修改才会写入,留空的输入框不会改动原值。批量操作会合并到每张照片已有的修改上。</p>
+          <p class="hint">只有填写 / 选择过的项目才会写入,留空的输入框不会改动原值。批量操作会合并到每张照片已有的修改上。</p>
 
-          <h4>日期时间</h4>
+          <h4><span class="step-no">1</span> 日期时间</h4>
           <div class="field">
             <label>操作方式</label>
             <select id="b-dateMode">
@@ -192,16 +213,16 @@
               <span>秒</span><input type="number" id="b-shS" value="0">
             </div>
             <label class="check-wrap"><input type="checkbox" id="b-shiftAll" checked> 同时平移修改时间与数字化时间</label>
-            <p class="hint">示例:相机时区差 8 小时,时填 <b>+8</b>;胶卷扫描时间全部快了 3 天,日填 <b>-3</b>。</p>
+            <p class="hint" style="margin:0">示例:相机时区差 8 小时,时填 <b>+8</b>;胶卷扫描时间全部快了 3 天,日填 <b>-3</b>。</p>
           </div>
           <div id="b-dateSet" class="sub-box" hidden>
             <div class="dt-row">
               <input type="datetime-local" id="b-setDate" step="60">
-              <input type="number" id="b-setSec" min="0" max="59" class="sec-input" title="秒">
+              <input type="number" id="b-setSec" min="0" max="59" class="sec-input" title="秒" placeholder="秒">
             </div>
           </div>
 
-          <h4>GPS 位置</h4>
+          <h4><span class="step-no">2</span> GPS 位置</h4>
           <div class="field">
             <label>操作方式</label>
             <select id="b-gpsMode">
@@ -217,13 +238,13 @@
               <div class="field"><label>经度</label><input type="number" id="b-lng" step="any"></div>
               <div class="field"><label>海拔(可留空)</label><input type="number" id="b-alt" step="any"></div>
             </div>
-            <p class="hint">提示:先在“单张编辑”里用地图给一张照片选好点,再用“从某张照片复制”应用到其余照片,最方便。</p>
+            <p class="hint" style="margin:0">提示:先在「单张编辑」里用地图给一张照片选好点,再用「从某张照片复制」应用到其余照片,最方便。</p>
           </div>
           <div id="b-gpsCopy" class="sub-box" hidden>
             <div class="field"><label>复制自</label><select id="b-copySrc"></select></div>
           </div>
 
-          <h4>相机与文本(留空 = 不修改)</h4>
+          <h4><span class="step-no">3</span> 相机与文本 <span style="font-weight:400">(留空 = 不修改)</span></h4>
           <div class="grid2">
             <div class="field"><label>厂商 Make</label><input type="text" id="b-make"></div>
             <div class="field"><label>机型 Model</label><input type="text" id="b-model"></div>
@@ -234,7 +255,7 @@
             <div class="field span2"><label>描述 ImageDescription</label><input type="text" id="b-description"></div>
           </div>
 
-          <h4>其他</h4>
+          <h4><span class="step-no">4</span> 其他</h4>
           <label class="danger-label"><input type="checkbox" id="b-removeExif"> 清除勾选照片的全部 EXIF(其他批量设置将忽略)</label>
 
           <div class="row-actions">
@@ -271,8 +292,8 @@
 <script src="vendor/piexif.js"></script>
 <script src="vendor/exifr.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="core.js"></script>
+<script src="core.js?v=2"></script>
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="app.js" defer></script>
+<script src="app.js?v=2" defer></script>
 </body>
 </html>

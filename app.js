@@ -254,6 +254,13 @@ function refreshWorkspace() {
 
 function selectedItem() { return state.items.find((i) => i.id === state.selectedId) || null; }
 
+// 有修改的字段加蓝色圆点高亮
+function updateFieldHighlights(item) {
+  document.querySelectorAll('[data-patch]').forEach((el) => {
+    el.classList.toggle('is-modified', !!item.patch && el.dataset.patch in item.patch);
+  });
+}
+
 function effValue(item, key) {
   return key in item.patch ? item.patch[key] : (item.parsed ? item.parsed[key] : undefined);
 }
@@ -279,6 +286,10 @@ function selectItem(id) {
     const d = v == null ? null : CORE.parseExifDate(v);
     $(`#f-${key}`).value = dateToInputValue(d);
     $(`#f-${key}Sec`).value = d ? d.getSeconds() : '';
+    const exifKey = DATE_FIELDS.find((f) => f[0] === key)[1];
+    const origD = item.parsed ? CORE.parseExifDate(item.parsed[exifKey]) : null;
+    const oh = $(`#orig-${key}`);
+    if (oh) oh.textContent = '原值:' + (origD ? CORE.exifDateToStr(origD) : '无');
   });
 
   // GPS
@@ -311,6 +322,7 @@ function selectItem(id) {
 
   updateMapForItem(item);
   renderAllExifTable(item);
+  updateFieldHighlights(item);
 }
 
 /* --- 日期 --- */
@@ -360,6 +372,7 @@ function bindTextField(key, exifKey) {
 function afterEditChange(item) {
   renderList();
   renderActionBar();
+  updateFieldHighlights(item);
   $('#btnRevert').disabled = !hasPatch(item);
   $('#btnRevert').textContent = hasPatch(item) ? '↩️ 撤销本张修改' : '↩️ 无修改';
   if (item.id === state.selectedId) $('#f-removeExif').checked = !!item.patch.removeExif;
