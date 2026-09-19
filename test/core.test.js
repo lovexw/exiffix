@@ -207,6 +207,25 @@ async function verifyCommon(parsed, label) {
     assert.strictEqual(core.binStrToText('plain ascii'), 'plain ascii');
   });
 
+  console.log('格式嗅探');
+  await test('sniffImageKind 识别常见魔数', () => {
+    const u8 = (arr) => new Uint8Array(arr);
+    const s = (str, extra = 12) => u8([...str.split('').map(c => c.charCodeAt(0)), ...new Array(extra).fill(0)]);
+    assert.strictEqual(core.sniffImageKind(u8([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0])), 'jpeg');
+    assert.strictEqual(core.sniffImageKind(u8([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])), 'png');
+    assert.strictEqual(core.sniffImageKind(s('RIFF1234WEBPVP8 ')), 'webp');
+    assert.strictEqual(core.sniffImageKind(s('....ftypheichevc')), 'heic');
+    assert.strictEqual(core.sniffImageKind(s('....ftypmif1msf1')), 'heic');
+    assert.strictEqual(core.sniffImageKind(s('....ftypavifmif1')), 'avif');
+    assert.strictEqual(core.sniffImageKind(s('....ftypisommp42')), null, 'mp4 不误判');
+    assert.strictEqual(core.sniffImageKind(u8([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])), null);
+  });
+
+  await test('jpegWithExif 对非 JPEG 字节给出友好错误', () => {
+    const fakeJpg = new Uint8Array(fs.readFileSync(path.join(ROOT, 'test/fixtures/tiny.webp')));
+    assert.throws(() => core.jpegWithExif(fakeJpg, { model: 'x' }), /不是有效的 JPEG/);
+  });
+
   console.log(`\n结果: ${passed} 通过, ${failed} 失败`);
   process.exit(failed ? 1 : 0);
 })();

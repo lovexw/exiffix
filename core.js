@@ -168,9 +168,33 @@
     return binStrToU8(piexif.dump(dict).slice(6)); // 去掉 "Exif\0\0" 头
   }
 
+  // ---------- 格式嗅探:按文件头识别真实格式,纠正伪装的扩展名 ----------
+
+  function sniffImageKind(u8) {
+    u8 = ensureU8(u8);
+    if (u8.length < 12) return null;
+    if (u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return 'jpeg';
+    if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return 'png';
+    if (String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) === 'RIFF' &&
+        String.fromCharCode(u8[8], u8[9], u8[10], u8[11]) === 'WEBP') return 'webp';
+    // ISOBMFF(HEIC/HEIF/AVIF):偏移 4 处为 "ftyp",主要品牌在偏移 8
+    if (String.fromCharCode(u8[4], u8[5], u8[6], u8[7]) === 'ftyp') {
+      var brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]).toLowerCase();
+      if (brand.indexOf('heic') === 0 || brand.indexOf('heix') === 0 || brand.indexOf('hevc') === 0 ||
+          brand.indexOf('heim') === 0 || brand.indexOf('heis') === 0 ||
+          brand === 'mif1' || brand === 'msf1' || brand === 'heif') return 'heic';
+      if (brand === 'avif' || brand === 'avis') return 'avif';
+    }
+    return null;
+  }
+
   // ---------- JPEG ----------
 
   function jpegWithExif(u8, patch) {
+    u8 = ensureU8(u8);
+    if (!(u8[0] === 0xff && u8[1] === 0xd8)) {
+      throw new Error('不是有效的 JPEG 文件(文件实际格式与扩展名可能不符)');
+    }
     var bin = u8ToBinStr(u8);
     if (patch.removeExif) return binStrToU8(piexif.remove(bin));
     var dict;
@@ -452,6 +476,7 @@
     setGps: setGps,
     dictFromTiffBytes: dictFromTiffBytes,
     tiffBytesFromDict: tiffBytesFromDict,
+    sniffImageKind: sniffImageKind,
     jpegWithExif: jpegWithExif,
     pngWithExif: pngWithExif,
     webpWithExif: webpWithExif,

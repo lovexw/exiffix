@@ -132,6 +132,19 @@ async function ensureHeicDecoder() {
   return ensureHeicDecoder._p;
 }
 
+// 借助浏览器解码能力把图像重编码为 JPEG(HEIC/AVIF/伪装文件兜底)
+async function reencodeToJpeg(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const out = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  if (!out) throw new Error('无法将图像转存为 JPEG');
+  return out;
+}
+
 const READ_OPTS = {
   tiff: true, ifd0: true, exif: true, gps: true, interop: true,
   translateValues: true, translateKeys: true, reviveValues: true, silentErrors: true,
@@ -139,6 +152,16 @@ const READ_OPTS = {
 
 async function loadItem(item) {
   try {
+    // 按文件头识别真实格式:扩展名可能是伪装的(如 .jpg 实为 HEIC/WebP)
+    try {
+      const head = new Uint8Array(await item.file.slice(0, 32).arrayBuffer());
+      const magic = CORE.sniffImageKind(head);
+      if (magic && magic !== item.kind) {
+        item.kind = magic;
+        toast(`「${item.name}」实际是 ${magic.toUpperCase()} 格式,已按真实格式处理`, 'ok');
+      }
+    } catch (e) { /* 保留扩展名判断 */ }
+
     let displayBlob = item.file;
     if (item.kind === 'heic') {
       busy(true, `正在解码 HEIC:${item.name}`);
@@ -147,6 +170,10 @@ async function loadItem(item) {
       displayBlob = Array.isArray(out) ? out[0] : out;
       item.displayBlob = displayBlob;
       busy(false);
+    } else if (item.kind === 'avif') {
+      // 浏览器可解码显示;保存时需转为 JPEG
+      displayBlob = await reencodeToJpeg(item.file);
+      item.displayBlob = displayBlob;
     }
     item.blobUrl = URL.createObjectURL(item.file);
     item.displayUrl = URL.createObjectURL(displayBlob);
@@ -573,14 +600,29 @@ async function saveItem(item) {
   if (!hasPatch(item)) return { blob: item.file, name: item.name };
   let src = item.file;
   let kind = item.kind;
-  if (kind === 'heic') { src = item.displayBlob; kind = 'jpeg'; }
-  const buf = new Uint8Array(await src.arrayBuffer());
+  if (kind === 'heic' || kind === 'avif') {
+    if (!item.displayBlob) throw new Error('图像仍在解码中,请稍候重试');
+    src = item.displayBlob;
+    kind = 'jpeg';
+  }
+  let buf = new Uint8Array(await src.arrayBuffer());
+  if (kind === 'jpeg' && (buf[0] !== 0xff || buf[1] !== 0xd8)) {
+    // 实际不是 JPEG:借助浏览器解码后转存为 JPEG 再写入 EXIF
+    try {
+      const re = await reencodeToJpeg(new Blob([buf]));
+      buf = new Uint8Array(await re.arrayBuffer());
+    } catch (e) {
+      throw new Error('该文件实际格式不是 JPEG 且无法解码,请确认图片格式');
+    }
+  }
   let out;
   if (kind === 'jpeg') out = CORE.jpegWithExif(buf, item.patch);
   else if (kind === 'png') out = CORE.pngWithExif(buf, item.patch);
   else if (kind === 'webp') out = CORE.webpWithExif(buf, item.patch, item.width, item.height);
-  else throw new Error(`暂不支持写入 ${item.kind} 格式`);
-  const name = kind === 'jpeg' && item.kind === 'heic' ? item.name.replace(/\.hei[cf]$/i, '.jpg') : item.name;
+  else throw new Error(`暂不支持写入 ${kind.toUpperCase()} 格式`);
+  const name = kind === 'jpeg' && item.kind !== 'jpeg'
+    ? item.name.replace(/\.[a-z0-9]+$/i, '') + '.jpg'
+    : item.name;
   return { blob: new Blob([out], { type: MIME[kind] || 'application/octet-stream' }), name };
 }
 
